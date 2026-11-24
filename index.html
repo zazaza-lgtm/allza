@@ -1,0 +1,1093 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Bayangan di Lorong Gelap - Game Horor</title>
+    <!-- Tailwind CSS untuk tata letak UI yang responsif -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Tone.js untuk efek suara horor prosedural tanpa file eksternal -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <!-- Google Fonts untuk tipografi horor -->
+    <link href="https://fonts.googleapis.com/css2?family=Creepster&family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+    
+    <style>
+        /* Kustomisasi CSS untuk atmosfer horor & kontrol layar sentuh */
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #050505;
+            color: #e5e5e5;
+            font-family: 'Courier Prime', monospace;
+            overflow: hidden;
+            touch-action: none;
+        }
+
+        .horror-title {
+            font-family: 'Creepster', cursive;
+            letter-spacing: 3px;
+            text-shadow: 0 0 15px rgba(220, 38, 38, 0.8), 0 0 30px rgba(0, 0, 0, 0.9);
+        }
+
+        /* Efek CRT / Scanlines & Vignette */
+        .crt-overlay {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            background: radial-gradient(circle, rgba(0,0,0,0) 50%, rgba(0,0,0,0.85) 100%),
+                        linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%);
+            background-size: 100% 100%, 100% 4px;
+            z-index: 20;
+        }
+
+        /* Efek Glitch saat hantu mendekat */
+        @keyframes glitch {
+            0% { transform: translate(0) }
+            20% { transform: translate(-3px, 3px) }
+            40% { transform: translate(-3px, -3px) }
+            60% { transform: translate(3px, 3px) }
+            80% { transform: translate(3px, -3px) }
+            100% { transform: translate(0) }
+        }
+
+        .glitch-active {
+            animation: glitch 0.15s infinite;
+            filter: contrast(150%) hue-rotate(-30deg);
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+        }
+
+        /* Tombol bergaya horor */
+        .btn-horror {
+            background: linear-gradient(180deg, #7f1d1d 0%, #450a0a 100%);
+            border: 1px solid #ef4444;
+            box-shadow: 0 4px 15px rgba(220, 38, 38, 0.4), inset 0 1px 0 rgba(255,255,255,0.2);
+            transition: all 0.2s ease;
+        }
+
+        .btn-horror:hover {
+            background: linear-gradient(180deg, #991b1b 0%, #7f1d1d 100%);
+            box-shadow: 0 0 25px rgba(239, 68, 68, 0.8);
+            transform: scale(1.03);
+        }
+
+        .btn-horror:active {
+            transform: scale(0.97);
+        }
+
+        /* Virtual Joystick untuk perangkat mobile */
+        #joystick-zone {
+            position: fixed;
+            bottom: 30px;
+            left: 30px;
+            width: 110px;
+            height: 110px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.08);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            z-index: 30;
+            display: none;
+        }
+
+        #joystick-knob {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 44px;
+            height: 44px;
+            margin-top: -22px;
+            margin-left: -22px;
+            border-radius: 50%;
+            background: rgba(220, 38, 38, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            pointer-events: none;
+        }
+
+        @media (pointer: coarse) {
+            #joystick-zone {
+                display: block;
+            }
+        }
+    </style>
+</head>
+<body class="relative w-full h-full bg-black overflow-hidden">
+
+    <!-- Efek Lapisan Layar Horor -->
+    <div class="crt-overlay"></div>
+
+    <!-- Canvas Utama Game -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- HUD (Heads-Up Display) saat bermain -->
+    <div id="hud" class="hidden fixed top-0 left-0 w-full p-4 sm:p-6 flex flex-wrap justify-between items-start z-30 pointer-events-none">
+        <!-- Status Catatan & Tujuan -->
+        <div class="bg-black/70 border border-red-900/60 rounded-lg p-3 backdrop-blur-sm shadow-lg">
+            <div class="text-xs text-red-400 uppercase tracking-widest mb-1">Misi Bertahan Hidup</div>
+            <div class="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
+                <span>📜 Catatan Terkumpul:</span>
+                <span id="notes-count" class="text-red-500">0 / 5</span>
+            </div>
+            <div id="exit-hint" class="hidden text-xs text-emerald-400 mt-1 animate-pulse">
+                Semua catatan terkumpul! Cari PINTU KELUAR (Hijau)!
+            </div>
+        </div>
+
+        <!-- Status Baterai Senter & Stamina -->
+        <div class="bg-black/70 border border-zinc-800 rounded-lg p-3 backdrop-blur-sm shadow-lg flex flex-col gap-2 min-w-[160px] sm:min-w-[200px]">
+            <div>
+                <div class="flex justify-between text-xs mb-1">
+                    <span class="text-amber-300">🔦 Baterai Senter</span>
+                    <span id="battery-text">100%</span>
+                </div>
+                <div class="w-full h-2.5 bg-zinc-900 rounded-full overflow-hidden border border-zinc-700">
+                    <div id="battery-bar" class="h-full bg-amber-400 transition-all duration-150" style="width: 100%;"></div>
+                </div>
+            </div>
+            <div>
+                <div class="flex justify-between text-xs mb-1">
+                    <span class="text-blue-300">🏃 Stamina Lari</span>
+                    <span id="stamina-text">100%</span>
+                </div>
+                <div class="w-full h-2.5 bg-zinc-900 rounded-full overflow-hidden border border-zinc-700">
+                    <div id="stamina-bar" class="h-full bg-blue-500 transition-all duration-150" style="width: 100%;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pesan / Bisikan Misterius di Layar -->
+    <div id="whisper-box" class="hidden fixed bottom-24 left-1/2 -translate-x-1/2 w-11/12 max-w-md bg-black/85 border border-red-800/80 text-red-200 px-4 py-3 rounded-lg text-center text-sm sm:text-base italic shadow-2xl z-30 pointer-events-none transition-opacity duration-500">
+        "Jangan menoleh ke belakang..."
+    </div>
+
+    <!-- Kontrol Tombol Aksi Mobile (Senter & Lari) -->
+    <div id="mobile-actions" class="hidden fixed bottom-8 right-6 flex flex-col gap-3 z-30 sm:hidden">
+        <button id="btn-mobile-flashlight" class="p-4 rounded-full bg-amber-900/70 border border-amber-400 text-white shadow-lg active:scale-95">
+            🔦
+        </button>
+        <button id="btn-mobile-sprint" class="p-4 rounded-full bg-blue-900/70 border border-blue-400 text-white shadow-lg active:scale-95">
+            🏃
+        </button>
+    </div>
+
+    <!-- Virtual Joystick untuk Layar Sentuh -->
+    <div id="joystick-zone">
+        <div id="joystick-knob"></div>
+    </div>
+
+    <!-- Layar Menu Utama / Mulai -->
+    <div id="start-screen" class="fixed inset-0 bg-black/95 flex flex-col items-center justify-center p-6 text-center z-40">
+        <div class="max-w-lg w-full bg-zinc-950/90 border border-red-900/50 rounded-2xl p-6 sm:p-8 shadow-[0_0_50px_rgba(153,27,27,0.3)]">
+            <div class="text-red-600 text-sm tracking-[0.3em] uppercase mb-2">Teror Psikologis 2D</div>
+            <h1 class="horror-title text-4xl sm:text-6xl text-red-600 mb-4">BAYANGAN DI LORONG GELAP</h1>
+            <p class="text-zinc-400 text-sm sm:text-base mb-6 leading-relaxed">
+                Kamu terjebak di dalam fasilitas terbengkalai yang gelap gulita. Kumpulkan <span class="text-red-400 font-bold">5 Catatan Ritual</span> untuk membuka pintu keluar. Sesuatu sedang mengintai di dalam kegelapan...
+            </p>
+
+            <!-- Panduan Kontrol -->
+            <div class="bg-black/60 border border-zinc-800 rounded-xl p-4 mb-6 text-left text-xs sm:text-sm text-zinc-300 space-y-2">
+                <div class="font-bold text-red-400 mb-1">Cara Bermain:</div>
+                <p>🖥️ <b>PC:</b> <span class="text-white">WASD / Panah</span> untuk bergerak, <span class="text-white">Mouse</span> arahkan senter, <span class="text-white">Klik / F</span> matikan/nyalakan senter, <span class="text-white">Shift</span> untuk lari.</p>
+                <p>📱 <b>HP:</b> Gunakan <span class="text-white">Joystick Kiri</span> untuk jalan, sentuh layar untuk arah senter.</p>
+                <p>⚠️ <b>Tips:</b> Cahaya senter menarik perhatiannya. Matikan senter jika ia terlalu dekat!</p>
+            </div>
+
+            <button id="start-btn" class="btn-horror w-full py-4 rounded-xl text-white font-bold text-lg tracking-wider uppercase cursor-pointer">
+                Masuk ke Kegelapan
+            </button>
+        </div>
+    </div>
+
+    <!-- Layar Game Over / Jumpscare -->
+    <div id="gameover-screen" class="hidden fixed inset-0 bg-red-950/95 flex flex-col items-center justify-center p-6 text-center z-50">
+        <div class="max-w-md w-full bg-black/90 border-2 border-red-600 rounded-2xl p-8 shadow-[0_0_80px_rgba(220,38,38,0.8)]">
+            <div class="text-6xl mb-4 animate-bounce">💀</div>
+            <h2 class="horror-title text-4xl sm:text-5xl text-red-500 mb-3">KAMU TERTANGKAP</h2>
+            <p id="death-reason" class="text-zinc-300 text-sm sm:text-base mb-6">
+                Bayangan itu menelanmu dalam kegelapan abadi...
+            </p>
+            <button id="restart-btn" class="btn-horror w-full py-3.5 rounded-xl text-white font-bold text-base uppercase tracking-wider cursor-pointer">
+                Coba Lagi
+            </button>
+        </div>
+    </div>
+
+    <!-- Layar Menang -->
+    <div id="win-screen" class="hidden fixed inset-0 bg-zinc-950/95 flex flex-col items-center justify-center p-6 text-center z-50">
+        <div class="max-w-md w-full bg-zinc-900/90 border border-emerald-500/60 rounded-2xl p-8 shadow-[0_0_60px_rgba(16,185,129,0.3)]">
+            <div class="text-5xl mb-4">🚪✨</div>
+            <h2 class="horror-title text-4xl sm:text-5xl text-emerald-400 mb-3">BERHASIL SELAMAT!</h2>
+            <p class="text-zinc-300 text-sm sm:text-base mb-6">
+                Kamu berhasil mengumpulkan seluruh catatan ritual dan melarikan diri sebelum baterai sentermu habis sepenuhnya.
+            </p>
+            <button id="play-again-btn" class="w-full py-3.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 border border-emerald-400 text-white font-bold text-base uppercase tracking-wider transition cursor-pointer">
+                Mainkan Lagi
+            </button>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * SISTEM AUDIO HOROR PROSEDURAL (TONE.JS)
+         * Menghasilkan suara ambient mencekam, detak jantung, efek ambil catatan, dan jumpscare
+         */
+        class HorrorAudio {
+            constructor() {
+                this.initialized = false;
+                this.drone = null;
+                this.heartbeat = null;
+                this.noise = null;
+            }
+
+            async init() {
+                if (this.initialized) return;
+                try {
+                    await Tone.start();
+                    
+                    // Suara dengungan rendah (Dark Ambient Drone)
+                    this.drone = new Tone.Oscillator(45, "sawtooth").toDestination();
+                    const filter = new Tone.Filter(120, "lowpass").toDestination();
+                    this.drone.disconnect();
+                    this.drone.connect(filter);
+                    this.drone.volume.value = -22;
+                    this.drone.start();
+
+                    // Synth untuk efek suara kaget & ambil item
+                    this.sfxSynth = new Tone.PolySynth(Tone.Synth).toDestination();
+                    this.sfxSynth.volume.value = -8;
+
+                    this.initialized = true;
+                } catch (e) {
+                    console.warn("Audio tidak dapat dimulai:", e);
+                }
+            }
+
+            playClick() {
+                if (!this.initialized) return;
+                this.sfxSynth.triggerAttackRelease("C5", "32n");
+            }
+
+            playCollectNote() {
+                if (!this.initialized) return;
+                this.sfxSynth.triggerAttackRelease(["D4", "F4", "A4", "C#5"], "8n");
+            }
+
+            playBatteryPickup() {
+                if (!this.initialized) return;
+                this.sfxSynth.triggerAttackRelease(["G4", "B4", "D5"], "16n");
+            }
+
+            playHeartbeat(intensity) {
+                if (!this.initialized) return;
+                // intensity: 0 (jauh) sampai 1 (sangat dekat)
+                if (intensity > 0.2 && Math.random() < intensity * 0.12) {
+                    this.sfxSynth.triggerAttackRelease("C1", "16n");
+                }
+            }
+
+            playJumpscare() {
+                if (!this.initialized) return;
+                const scream = new Tone.NoiseSynth({
+                    noise: { type: "white" },
+                    envelope: { attack: 0.01, decay: 0.8, sustain: 0 }
+                }).toDestination();
+                scream.volume.value = 2;
+                scream.triggerAttackRelease("4n");
+                this.sfxSynth.triggerAttackRelease(["C2", "C#2", "F#2", "G2"], "2n");
+            }
+
+            stopDrone() {
+                if (this.drone) {
+                    this.drone.volume.value = -60;
+                }
+            }
+
+            resumeDrone() {
+                if (this.drone) {
+                    this.drone.volume.value = -22;
+                }
+            }
+        }
+
+        /**
+         * KONFIGURASI & STATE UTAMA GAME
+         */
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const audio = new HorrorAudio();
+
+        // Elemen UI
+        const startScreen = document.getElementById('start-screen');
+        const gameoverScreen = document.getElementById('gameover-screen');
+        const winScreen = document.getElementById('win-screen');
+        const hud = document.getElementById('hud');
+        const notesCountEl = document.getElementById('notes-count');
+        const exitHintEl = document.getElementById('exit-hint');
+        const batteryBar = document.getElementById('battery-bar');
+        const batteryText = document.getElementById('battery-text');
+        const staminaBar = document.getElementById('stamina-bar');
+        const staminaText = document.getElementById('stamina-text');
+        const whisperBox = document.getElementById('whisper-box');
+        const mobileActions = document.getElementById('mobile-actions');
+
+        // Kalimat misterius saat mengambil catatan
+        const loreMessages = [
+            "Catatan #1: 'Ia tidak bisa melihat di dalam gelap, tapi ia mendengar langkah kakimu...'",
+            "Catatan #2: 'Jangan sorotkan sentermu terlalu lama ke arahnya, itu membuatnya marah!'",
+            "Catatan #3: 'Kami mengunci pintu keluar agar ia tidak lepas ke dunia luar...'",
+            "Catatan #4: 'Baterai kami hampir habis. Suara cakarannya semakin dekat...'",
+            "Catatan #5: 'Pintu keluar telah terbuka! Lari sekarang sebelum terlambat!'"
+        ];
+
+        // State Game
+        let gameState = 'MENU'; // MENU, PLAYING, GAMEOVER, WIN
+        let animationFrameId;
+        let lastTime = 0;
+
+        // Peta Labirin (1 = Dinding, 0 = Lantai, 2 = Pintu Keluar)
+        const TILE_SIZE = 64;
+        const MAP_ROWS = 21;
+        const MAP_COLS = 25;
+        let map = [];
+
+        // Objek Pemain
+        const player = {
+            x: 0,
+            y: 0,
+            radius: 14,
+            speed: 145,
+            sprintSpeed: 235,
+            angle: 0,
+            flashlightOn: true,
+            battery: 100,
+            stamina: 100,
+            isSprinting: false,
+            notesCollected: 0,
+            totalNotes: 5
+        };
+
+        // Objek Entitas Hantu (The Shadow)
+        const monster = {
+            x: 0,
+            y: 0,
+            radius: 18,
+            baseSpeed: 88,
+            chaseSpeed: 168,
+            state: 'PATROL', // PATROL, CHASE
+            targetX: 0,
+            targetY: 0,
+            alertTimer: 0,
+            visibleAlpha: 0
+        };
+
+        // Item di dalam peta
+        let notes = [];
+        let batteries = [];
+        let exitDoor = { x: 0, y: 0, unlocked: false };
+
+        // Input Keyboard, Mouse, & Touch
+        const keys = {};
+        const pointer = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+        const joystick = { active: false, dx: 0, dy: 0 };
+
+        /**
+         * INISIALISASI UKURAN CANVAS RESPONSIF
+         */
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        /**
+         * GENERATOR PETA LABIRIN PROSEDURAL
+         */
+        function generateMap() {
+            // Inisialisasi penuh dinding
+            map = Array.from({ length: MAP_ROWS }, () => Array(MAP_COLS).fill(1));
+
+            // Algoritma Recursive Backtracker untuk lorong labirin
+            function carve(r, c) {
+                const dirs = [
+                    [-2, 0], [2, 0], [0, -2], [0, 2]
+                ].sort(() => Math.random() - 0.5);
+
+                for (const [dr, dc] of dirs) {
+                    const nr = r + dr;
+                    const nc = c + dc;
+                    if (nr > 0 && nr < MAP_ROWS - 1 && nc > 0 && nc < MAP_COLS - 1 && map[nr][nc] === 1) {
+                        map[r + dr / 2][c + dc / 2] = 0;
+                        map[nr][nc] = 0;
+                        carve(nr, nc);
+                    }
+                }
+            }
+
+            map[1][1] = 0;
+            carve(1, 1);
+
+            // Tambahkan beberapa lubang ekstra pada dinding agar pemain tidak terjebak jalan buntu total
+            for (let i = 0; i < 28; i++) {
+                const rr = Math.floor(Math.random() * (MAP_ROWS - 2)) + 1;
+                const cc = Math.floor(Math.random() * (MAP_COLS - 2)) + 1;
+                map[rr][cc] = 0;
+            }
+        }
+
+        /**
+         * MENDAPATKAN POSISI LANTAI KOSONG ACAK
+         */
+        function getRandomFloorTile(minDistFromPlayer = 0) {
+            let attempts = 0;
+            while (attempts < 500) {
+                const r = Math.floor(Math.random() * (MAP_ROWS - 2)) + 1;
+                const c = Math.floor(Math.random() * (MAP_COLS - 2)) + 1;
+                if (map[r][c] === 0) {
+                    const wx = c * TILE_SIZE + TILE_SIZE / 2;
+                    const wy = r * TILE_SIZE + TILE_SIZE / 2;
+                    const dist = Math.hypot(wx - player.x, wy - player.y);
+                    if (dist >= minDistFromPlayer) {
+                        return { x: wx, y: wy, r, c };
+                    }
+                }
+                attempts++;
+            }
+            return { x: TILE_SIZE * 1.5, y: TILE_SIZE * 1.5, r: 1, c: 1 };
+        }
+
+        /**
+         * MEMULAI / MERESET PERMAINAN
+         */
+        function initGame() {
+            generateMap();
+
+            // Posisi awal pemain di pojok kiri atas
+            player.x = TILE_SIZE * 1.5;
+            player.y = TILE_SIZE * 1.5;
+            player.battery = 100;
+            player.stamina = 100;
+            player.flashlightOn = true;
+            player.notesCollected = 0;
+
+            // Posisi pintu keluar jauh dari pemain
+            const exitTile = getRandomFloorTile(TILE_SIZE * 12);
+            exitDoor = { x: exitTile.x, y: exitTile.y, unlocked: false };
+
+            // Sebar 5 Catatan Ritual
+            notes = [];
+            for (let i = 0; i < player.totalNotes; i++) {
+                const pos = getRandomFloorTile(TILE_SIZE * 4);
+                notes.push({ x: pos.x, y: pos.y, collected: false, id: i });
+            }
+
+            // Sebar 4 Baterai Cadangan
+            batteries = [];
+            for (let i = 0; i < 4; i++) {
+                const pos = getRandomFloorTile(TILE_SIZE * 3);
+                batteries.push({ x: pos.x, y: pos.y, collected: false });
+            }
+
+            // Posisi awal Monster jauh dari pemain
+            const monsterPos = getRandomFloorTile(TILE_SIZE * 10);
+            monster.x = monsterPos.x;
+            monster.y = monsterPos.y;
+            monster.state = 'PATROL';
+            pickNewPatrolTarget();
+
+            // Reset UI
+            updateHUD();
+            exitHintEl.classList.add('hidden');
+            document.body.classList.remove('glitch-active');
+            showWhisper("Carilah 5 catatan ritual untuk membuka jalan keluar...");
+        }
+
+        function pickNewPatrolTarget() {
+            const pos = getRandomFloorTile(0);
+            monster.targetX = pos.x;
+            monster.targetY = pos.y;
+        }
+
+        function showWhisper(text) {
+            whisperBox.textContent = text;
+            whisperBox.classList.remove('hidden');
+            whisperBox.style.opacity = '1';
+            clearTimeout(whisperBox.timer);
+            whisperBox.timer = setTimeout(() => {
+                whisperBox.style.opacity = '0';
+                setTimeout(() => whisperBox.classList.add('hidden'), 500);
+            }, 4500);
+        }
+
+        /**
+         * DETEKSI TABRAKAN DENGAN DINDING
+         */
+        function checkWallCollision(x, y, radius) {
+            const minCol = Math.floor((x - radius) / TILE_SIZE);
+            const maxCol = Math.floor((x + radius) / TILE_SIZE);
+            const minRow = Math.floor((y - radius) / TILE_SIZE);
+            const maxRow = Math.floor((y + radius) / TILE_SIZE);
+
+            for (let r = minRow; r <= maxRow; r++) {
+                for (let c = minCol; c <= maxCol; c++) {
+                    if (r < 0 || r >= MAP_ROWS || c < 0 || c >= MAP_COLS || map[r][c] === 1) {
+                        // Cek jarak terdekat lingkaran ke kotak dinding
+                        const rectX = c * TILE_SIZE;
+                        const rectY = r * TILE_SIZE;
+                        const closestX = Math.max(rectX, Math.min(x, rectX + TILE_SIZE));
+                        const closestY = Math.max(rectY, Math.min(y, rectY + TILE_SIZE));
+                        const dist = Math.hypot(x - closestX, y - closestY);
+                        if (dist < radius) return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        /**
+         * CEK GARIS PANDANG (LINE OF SIGHT) ANTARA DUA TITIK
+         */
+        function hasLineOfSight(x1, y1, x2, y2) {
+            const dist = Math.hypot(x2 - x1, y2 - y1);
+            const steps = Math.ceil(dist / 16);
+            for (let i = 1; i < steps; i++) {
+                const t = i / steps;
+                const cx = x1 + (x2 - x1) * t;
+                const cy = y1 + (y2 - y1) * t;
+                const col = Math.floor(cx / TILE_SIZE);
+                const row = Math.floor(cy / TILE_SIZE);
+                if (row >= 0 && row < MAP_ROWS && col >= 0 && col < MAP_COLS && map[row][col] === 1) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        /**
+         * UPDATE LOGIKA GAME SETIAP FRAME
+         */
+        function update(dt) {
+            if (gameState !== 'PLAYING') return;
+
+            // 1. Pergerakan Pemain
+            let moveX = 0;
+            let moveY = 0;
+
+            if (keys['KeyW'] || keys['ArrowUp']) moveY -= 1;
+            if (keys['KeyS'] || keys['ArrowDown']) moveY += 1;
+            if (keys['KeyA'] || keys['ArrowLeft']) moveX -= 1;
+            if (keys['KeyD'] || keys['ArrowRight']) moveX += 1;
+
+            if (joystick.active) {
+                moveX = joystick.dx;
+                moveY = joystick.dy;
+            }
+
+            // Normalisasi vektor gerakan
+            const len = Math.hypot(moveX, moveY);
+            if (len > 0) {
+                moveX /= len;
+                moveY /= len;
+            }
+
+            // Logika Lari (Sprint) & Stamina
+            const wantsSprint = (keys['ShiftLeft'] || keys['ShiftRight'] || player.isSprinting) && len > 0;
+            if (wantsSprint && player.stamina > 5) {
+                player.stamina = Math.max(0, player.stamina - 28 * dt);
+            } else {
+                player.isSprinting = false;
+                player.stamina = Math.min(100, player.stamina + 15 * dt);
+            }
+
+            const currentSpeed = (wantsSprint && player.stamina > 5) ? player.sprintSpeed : player.speed;
+            const nextX = player.x + moveX * currentSpeed * dt;
+            const nextY = player.y + moveY * currentSpeed * dt;
+
+            // Terapkan gerakan terpisah sumbu X dan Y untuk efek meluncur mulus di dinding
+            if (!checkWallCollision(nextX, player.y, player.radius)) {
+                player.x = nextX;
+            }
+            if (!checkWallCollision(player.x, nextY, player.radius)) {
+                player.y = nextY;
+            }
+
+            // Arah Senter mengikuti posisi pointer relatif terhadap pemain di tengah layar
+            const screenCenterX = canvas.width / 2;
+            const screenCenterY = canvas.height / 2;
+            player.angle = Math.atan2(pointer.y - screenCenterY, pointer.x - screenCenterX);
+
+            // 2. Logika Baterai Senter
+            if (player.flashlightOn && player.battery > 0) {
+                player.battery = Math.max(0, player.battery - 2.3 * dt);
+                if (player.battery === 0) {
+                    player.flashlightOn = false;
+                    showWhisper("Baterai sentermu habis! Carilah baterai cadangan!");
+                }
+            }
+
+            // 3. Interaksi Pengambilan Catatan & Baterai
+            notes.forEach(note => {
+                if (!note.collected && Math.hypot(player.x - note.x, player.y - note.y) < player.radius + 18) {
+                    note.collected = true;
+                    player.notesCollected++;
+                    audio.playCollectNote();
+                    showWhisper(loreMessages[player.notesCollected - 1] || "Catatan ditemukan!");
+
+                    // Monster menjadi sedikit lebih agresif tiap catatan diambil
+                    monster.baseSpeed += 7;
+                    monster.chaseSpeed += 8;
+
+                    if (player.notesCollected >= player.totalNotes) {
+                        exitDoor.unlocked = true;
+                        exitHintEl.classList.remove('hidden');
+                    }
+                }
+            });
+
+            batteries.forEach(bat => {
+                if (!bat.collected && Math.hypot(player.x - bat.x, player.y - bat.y) < player.radius + 16) {
+                    bat.collected = true;
+                    player.battery = Math.min(100, player.battery + 45);
+                    player.flashlightOn = true;
+                    audio.playBatteryPickup();
+                    showWhisper("Baterai ditemukan! Daya senter terisi.");
+                }
+            });
+
+            // 4. Cek Kondisi Menang (Mencapai Pintu Keluar)
+            if (exitDoor.unlocked && Math.hypot(player.x - exitDoor.x, player.y - exitDoor.y) < player.radius + 24) {
+                triggerWin();
+                return;
+            }
+
+            // 5. Kecerdasan Buatan (AI) Monster Bayangan
+            const distToPlayer = Math.hypot(player.x - monster.x, player.y - monster.y);
+            const canSeePlayer = hasLineOfSight(monster.x, monster.y, player.x, player.y);
+
+            // Monster mendeteksi pemain jika senter menyala dalam jarak tertentu, atau pemain berlari sangat dekat
+            const detectionRange = player.flashlightOn ? 330 : (wantsSprint ? 190 : 95);
+
+            if (distToPlayer < detectionRange && canSeePlayer) {
+                monster.state = 'CHASE';
+                monster.targetX = player.x;
+                monster.targetY = player.y;
+                monster.alertTimer = 3.5; // Tetap mengejar selama 3.5 detik setelah kehilangan pandangan
+            } else if (monster.alertTimer > 0) {
+                monster.alertTimer -= dt;
+                monster.targetX = player.x;
+                monster.targetY = player.y;
+            } else {
+                monster.state = 'PATROL';
+            }
+
+            // Gerakkan Monster menuju target
+            const mAngle = Math.atan2(monster.targetY - monster.y, monster.targetX - monster.x);
+            const mSpeed = monster.state === 'CHASE' ? monster.chaseSpeed : monster.baseSpeed;
+            const mNextX = monster.x + Math.cos(mAngle) * mSpeed * dt;
+            const mNextY = monster.y + Math.sin(mAngle) * mSpeed * dt;
+
+            if (!checkWallCollision(mNextX, monster.y, monster.radius)) {
+                monster.x = mNextX;
+            } else if (monster.state === 'PATROL') {
+                pickNewPatrolTarget();
+            }
+
+            if (!checkWallCollision(monster.x, mNextY, monster.radius)) {
+                monster.y = mNextY;
+            } else if (monster.state === 'PATROL') {
+                pickNewPatrolTarget();
+            }
+
+            // Jika monster mencapai titik patroli, pilih titik baru
+            if (monster.state === 'PATROL' && Math.hypot(monster.targetX - monster.x, monster.targetY - monster.y) < 30) {
+                pickNewPatrolTarget();
+            }
+
+            // 6. Efek Ketegangan (Glitch & Detak Jantung) berdasarkan jarak monster
+            const dangerRatio = Math.max(0, 1 - distToPlayer / 350);
+            audio.playHeartbeat(dangerRatio);
+
+            if (distToPlayer < 170 && canSeePlayer) {
+                document.body.classList.add('glitch-active');
+            } else {
+                document.body.classList.remove('glitch-active');
+            }
+
+            // 7. Cek Kondisi Kalah (Tertangkap Monster)
+            if (distToPlayer < player.radius + monster.radius - 4) {
+                triggerGameOver();
+                return;
+            }
+
+            updateHUD();
+        }
+
+        function updateHUD() {
+            notesCountEl.textContent = `${player.notesCollected} / ${player.totalNotes}`;
+            const batPct = Math.round(player.battery);
+            batteryBar.style.width = `${batPct}%`;
+            batteryText.textContent = `${batPct}%`;
+            batteryBar.className = `h-full transition-all duration-150 ${batPct < 25 ? 'bg-red-500 animate-pulse' : 'bg-amber-400'}`;
+
+            const stamPct = Math.round(player.stamina);
+            staminaBar.style.width = `${stamPct}%`;
+            staminaText.textContent = `${stamPct}%`;
+        }
+
+        /**
+         * RENDER VISUAL & PENCAHAYAAN SENTER HOROR
+         */
+        function draw() {
+            ctx.fillStyle = '#030303';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            if (gameState !== 'PLAYING') return;
+
+            ctx.save();
+            // Kamera berpusat pada pemain
+            const camX = canvas.width / 2 - player.x;
+            const camY = canvas.height / 2 - player.y;
+            ctx.translate(camX, camY);
+
+            // 1. Gambar Lantai & Dinding yang terlihat di sekitar layar
+            const startCol = Math.max(0, Math.floor((player.x - canvas.width / 2) / TILE_SIZE) - 1);
+            const endCol = Math.min(MAP_COLS - 1, Math.ceil((player.x + canvas.width / 2) / TILE_SIZE) + 1);
+            const startRow = Math.max(0, Math.floor((player.y - canvas.height / 2) / TILE_SIZE) - 1);
+            const endRow = Math.min(MAP_ROWS - 1, Math.ceil((player.y + canvas.height / 2) / TILE_SIZE) + 1);
+
+            for (let r = startRow; r <= endRow; r++) {
+                for (let c = startCol; c <= endCol; c++) {
+                    const x = c * TILE_SIZE;
+                    const y = r * TILE_SIZE;
+
+                    if (map[r][c] === 1) {
+                        // Dinding Beton Tua
+                        ctx.fillStyle = '#18181b';
+                        ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
+                        ctx.strokeStyle = '#09090b';
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(x, y, TILE_SIZE, TILE_SIZE);
+                    } else {
+                        // Lantai Ubin Retak
+                        ctx.fillStyle = '#0f0f12';
+                        ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
+                        ctx.strokeStyle = '#141418';
+                        ctx.lineWidth = 1;
+                        ctx.strokeRect(x, y, TILE_SIZE, TILE_SIZE);
+                    }
+                }
+            }
+
+            // 2. Gambar Pintu Keluar
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(exitDoor.x, exitDoor.y, 22, 0, Math.PI * 2);
+            ctx.fillStyle = exitDoor.unlocked ? 'rgba(16, 185, 129, 0.35)' : 'rgba(127, 29, 29, 0.35)';
+            ctx.fill();
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = exitDoor.unlocked ? '#10b981' : '#7f1d1d';
+            ctx.stroke();
+            ctx.fillStyle = '#fff';
+            ctx.font = '18px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('🚪', exitDoor.x, exitDoor.y);
+            ctx.restore();
+
+            // 3. Gambar Item Catatan Ritual
+            notes.forEach(note => {
+                if (!note.collected) {
+                    ctx.save();
+                    // Cahaya redup di sekitar kertas
+                    const glow = ctx.createRadialGradient(note.x, note.y, 2, note.x, note.y, 24);
+                    glow.addColorStop(0, 'rgba(254, 240, 138, 0.6)');
+                    glow.addColorStop(1, 'rgba(254, 240, 138, 0)');
+                    ctx.fillStyle = glow;
+                    ctx.beginPath();
+                    ctx.arc(note.x, note.y, 24, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Kertas Catatan
+                    ctx.fillStyle = '#fef08a';
+                    ctx.fillRect(note.x - 8, note.y - 10, 16, 20);
+                    ctx.fillStyle = '#7f1d1d';
+                    ctx.fillRect(note.x - 5, note.y - 5, 10, 2);
+                    ctx.fillRect(note.x - 5, note.y, 8, 2);
+                    ctx.restore();
+                }
+            });
+
+            // 4. Gambar Item Baterai
+            batteries.forEach(bat => {
+                if (!bat.collected) {
+                    ctx.save();
+                    ctx.fillStyle = '#38bdf8';
+                    ctx.fillRect(bat.x - 6, bat.y - 10, 12, 20);
+                    ctx.fillStyle = '#e0f2fe';
+                    ctx.fillRect(bat.x - 3, bat.y - 13, 6, 3);
+                    ctx.restore();
+                }
+            });
+
+            // 5. Gambar Monster Bayangan
+            ctx.save();
+            const mGlow = ctx.createRadialGradient(monster.x, monster.y, 4, monster.x, monster.y, 35);
+            mGlow.addColorStop(0, 'rgba(0, 0, 0, 0.95)');
+            mGlow.addColorStop(0.6, 'rgba(127, 29, 29, 0.4)');
+            mGlow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = mGlow;
+            ctx.beginPath();
+            ctx.arc(monster.x, monster.y, 35, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Mata Merah Menyala di dalam kegelapan
+            const eyeOffset = 5;
+            const lookAngle = Math.atan2(player.y - monster.y, player.x - monster.x);
+            ctx.fillStyle = '#ef4444';
+            ctx.shadowColor = '#ef4444';
+            ctx.shadowBlur = 10;
+            ctx.beginPath();
+            ctx.arc(monster.x + Math.cos(lookAngle - 0.4) * eyeOffset, monster.y + Math.sin(lookAngle - 0.4) * eyeOffset, 2.5, 0, Math.PI * 2);
+            ctx.arc(monster.x + Math.cos(lookAngle + 0.4) * eyeOffset, monster.y + Math.sin(lookAngle + 0.4) * eyeOffset, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+
+            // 6. Gambar Pemain
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+            ctx.fillStyle = '#d4d4d8';
+            ctx.fill();
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = '#3f3f46';
+            ctx.stroke();
+            ctx.restore();
+
+            ctx.restore(); // Kembalikan transformasi kamera
+
+            // 7. EFEK KEGELAPAN & SOROTAN SENTER (LIGHTING MASK)
+            drawLightingOverlay();
+        }
+
+        function drawLightingOverlay() {
+            const cx = canvas.width / 2;
+            const cy = canvas.height / 2;
+
+            // Buat offscreen canvas sementara atau gunakan composite operation
+            ctx.save();
+            
+            // Buat path gelap menutupi seluruh layar kecuali area cahaya
+            ctx.beginPath();
+            ctx.rect(0, 0, canvas.width, canvas.height);
+
+            // Lubang cahaya redup di sekitar tubuh pemain (agar tidak buta total saat senter mati)
+            const ambientRadius = player.flashlightOn ? 75 : 42;
+            ctx.arc(cx, cy, ambientRadius, 0, Math.PI * 2, true);
+
+            // Jika senter menyala, potong kerucut cahaya senter
+            if (player.flashlightOn && player.battery > 0) {
+                const beamLength = Math.min(340, 140 + player.battery * 2);
+                const spread = 0.42; // Sudut lebar senter (radian)
+                
+                ctx.moveTo(cx, cy);
+                ctx.arc(cx, cy, beamLength, player.angle - spread, player.angle + spread, false);
+                ctx.closePath();
+            }
+
+            // Isi area di luar cahaya dengan kegelapan pekat
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.96)';
+            ctx.fill('evenodd');
+
+            // Tambahkan efek gradasi hangat di sorotan senter
+            if (player.flashlightOn && player.battery > 0) {
+                const beamLength = Math.min(340, 140 + player.battery * 2);
+                const spread = 0.42;
+                const grad = ctx.createRadialGradient(cx, cy, 10, cx, cy, beamLength);
+                
+                // Efek berkedip saat baterai lemah (< 20%)
+                const flicker = (player.battery < 20 && Math.random() < 0.25) ? 0.05 : 0.22;
+                grad.addColorStop(0, `rgba(254, 243, 199, ${flicker})`);
+                grad.addColorStop(1, 'rgba(0, 0, 0, 0.85)');
+
+                ctx.beginPath();
+                ctx.moveTo(cx, cy);
+                ctx.arc(cx, cy, beamLength, player.angle - spread, player.angle + spread, false);
+                ctx.closePath();
+                ctx.fillStyle = grad;
+                ctx.fill();
+            }
+
+            ctx.restore();
+        }
+
+        /**
+         * LOOP UTAMA GAME
+         */
+        function gameLoop(timestamp) {
+            const dt = Math.min((timestamp - lastTime) / 1000, 0.1);
+            lastTime = timestamp;
+
+            update(dt);
+            draw();
+
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+        /**
+         * TRANSISI STATUS GAME (START, GAME OVER, WIN)
+         */
+        async function startGame() {
+            await audio.init();
+            audio.resumeDrone();
+            startScreen.classList.add('hidden');
+            gameoverScreen.classList.add('hidden');
+            winScreen.classList.add('hidden');
+            hud.classList.remove('hidden');
+            mobileActions.classList.remove('hidden');
+
+            initGame();
+            gameState = 'PLAYING';
+            lastTime = performance.now();
+        }
+
+        function triggerGameOver() {
+            gameState = 'GAMEOVER';
+            audio.playJumpscare();
+            audio.stopDrone();
+            document.body.classList.remove('glitch-active');
+            hud.classList.add('hidden');
+            mobileActions.classList.add('hidden');
+            gameoverScreen.classList.remove('hidden');
+        }
+
+        function triggerWin() {
+            gameState = 'WIN';
+            audio.playCollectNote();
+            audio.stopDrone();
+            document.body.classList.remove('glitch-active');
+            hud.classList.add('hidden');
+            mobileActions.classList.add('hidden');
+            winScreen.classList.remove('hidden');
+        }
+
+        /**
+         * EVENT LISTENERS (KEYBOARD, MOUSE, TOUCH, & TOMBOL UI)
+         */
+        window.addEventListener('keydown', (e) => {
+            keys[e.code] = true;
+            if (e.code === 'KeyF' && gameState === 'PLAYING') {
+                toggleFlashlight();
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            keys[e.code] = false;
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            pointer.x = e.clientX;
+            pointer.y = e.clientY;
+        });
+
+        canvas.addEventListener('mousedown', (e) => {
+            if (gameState === 'PLAYING' && e.button === 0) {
+                toggleFlashlight();
+            }
+        });
+
+        function toggleFlashlight() {
+            if (player.battery > 0) {
+                player.flashlightOn = !player.flashlightOn;
+                audio.playClick();
+            }
+        }
+
+        // Kontrol Sentuh Layar untuk mengarahkan senter
+        canvas.addEventListener('touchstart', (e) => {
+            if (e.touches.length > 0) {
+                pointer.x = e.touches[0].clientX;
+                pointer.y = e.touches[0].clientY;
+            }
+        }, { passive: true });
+
+        canvas.addEventListener('touchmove', (e) => {
+            if (e.touches.length > 0) {
+                pointer.x = e.touches[0].clientX;
+                pointer.y = e.touches[0].clientY;
+            }
+        }, { passive: true });
+
+        // Logika Virtual Joystick untuk Mobile
+        const joyZone = document.getElementById('joystick-zone');
+        const joyKnob = document.getElementById('joystick-knob');
+
+        joyZone.addEventListener('touchstart', (e) => {
+            e.stopPropagation();
+            joystick.active = true;
+            handleJoystickMove(e.touches[0]);
+        }, { passive: false });
+
+        joyZone.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (joystick.active) handleJoystickMove(e.touches[0]);
+        }, { passive: false });
+
+        joyZone.addEventListener('touchend', (e) => {
+            e.stopPropagation();
+            joystick.active = false;
+            joystick.dx = 0;
+            joystick.dy = 0;
+            joyKnob.style.transform = `translate(0px, 0px)`;
+        });
+
+        function handleJoystickMove(touch) {
+            const rect = joyZone.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            const maxDist = rect.width / 2;
+
+            let dx = touch.clientX - centerX;
+            let dy = touch.clientY - centerY;
+            const dist = Math.hypot(dx, dy);
+
+            if (dist > maxDist) {
+                dx = (dx / dist) * maxDist;
+                dy = (dy / dist) * maxDist;
+            }
+
+            joyKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+            joystick.dx = dx / maxDist;
+            joystick.dy = dy / maxDist;
+        }
+
+        // Tombol Mobile & Layar Menu
+        document.getElementById('btn-mobile-flashlight').addEventListener('click', toggleFlashlight);
+        const mobileSprintBtn = document.getElementById('btn-mobile-sprint');
+        mobileSprintBtn.addEventListener('touchstart', () => player.isSprinting = true);
+        mobileSprintBtn.addEventListener('touchend', () => player.isSprinting = false);
+
+        document.getElementById('start-btn').addEventListener('click', startGame);
+        document.getElementById('restart-btn').addEventListener('click', startGame);
+        document.getElementById('play-again-btn').addEventListener('click', startGame);
+
+        // Jalankan loop animasi setelah halaman dimuat
+        window.onload = function () {
+            requestAnimationFrame(gameLoop);
+        };
+    </script>
+</body>
+</html>
